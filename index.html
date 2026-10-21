@@ -103,6 +103,7 @@ textarea.f{min-height:300px;line-height:1.6;font-family:Literata,Georgia,serif}
   <div class="bar"><button id="mback">Back</button></div>
   <div class="wrap">
     <p class="note" id="mode"></p>
+    <div id="instbox"><h3 style="margin:0 0 6px">Install this app</h3><p class="note" id="insthelp"></p><button class="mb" id="inst" style="display:none">Install Nyimbo on this phone</button></div>
     <button class="mb" id="exp">Save a backup file</button>
     <button class="mb" id="imp">Restore from a backup file</button>
     <div id="auth" style="display:none"><input class="f" id="em" type="email" placeholder="Editor email" autocomplete="username"><input class="f" id="pw" type="password" placeholder="Password" autocomplete="current-password" style="margin:8px 0"><button class="mb" id="signin">Sign in as editor</button></div>
@@ -235,7 +236,8 @@ function render(){
     if(!isNaN(x)&&isNaN(y))return -1;if(isNaN(x)&&!isNaN(y))return 1;
     return a.title.localeCompare(b.title);
   });
-  var ban=needImport()?'<div class="banner"><b>New songs and lyrics from your spreadsheet are ready.</b><button id="doimp">Add them to the shared library</button></div>':'';
+  var inst=(deferred&&!isStandalone())?'<div class="banner"><b>Install Nyimbo on this phone</b><button id="doinst">Install app</button></div>':'';
+  var ban=inst+(needImport()?'<div class="banner"><b>New songs and lyrics from your spreadsheet are ready.</b><button id="doimp">Add them to the shared library</button></div>':'');
   $('list').innerHTML=ban+(items.length?items.map(function(s){
     return '<button class="song" data-id="'+esc(s.id)+'"><span>'+(s.num?'<span class="num">'+esc(s.num)+'</span>':'')+'<b>'+esc(s.title)+'</b>'+(isComplete(s)?' <span class="ok" role="img" aria-label="Complete">✓</span>':'')+'</span><span class="tag">'+(favs[s.id]?'★ ':'')+esc(tc(s).join(', '))+'</span></button>'
   }).join(''):'<div class="empty">'+(cur==='★ Favourites'?'No favourites yet.<br>Open a song and tap ☆.':'No songs here yet.<br>Tap “Add song” to add one.')+'</div>');
@@ -244,7 +246,7 @@ $('chips').onclick=function(e){
   if(e.target.getAttribute('data-add')){var n=prompt('New song type (for example: Slow worship)');if(n)addType(n);return;}
   var c=e.target.getAttribute('data-c');if(c){cur=c;render();}};
 $('q').oninput=render;
-$('list').onclick=function(e){if(e.target.id==='doimp'){importBuiltin();return;}var b=e.target.closest('.song');if(b)openSong(b.getAttribute('data-id'));};
+$('list').onclick=function(e){if(e.target.id==='doimp'){importBuiltin();return;}if(e.target.id==='doinst'){$('inst').onclick();return;}var b=e.target.closest('.song');if(b)openSong(b.getAttribute('data-id'));};
 
 /* ---- viewer ---- */
 function openSong(id){
@@ -338,7 +340,7 @@ function openMenu(){
     if(mirrorT)$('mode').textContent+=' Last synced: '+new Date(mirrorT).toLocaleString()+'.';
   }
   $('auth').style.display=fbMode?'block':'none';
-  $('mn').classList.add('on');
+  instState();$('mn').classList.add('on');
 }
 $('menu').onclick=openMenu;
 $('addtype').onclick=function(){addType($('ntype').value);$('ntype').value=''};
@@ -353,6 +355,23 @@ $('dups').onclick=function(){
   box.innerHTML=d.length?'<p class="note">'+d.length+' pair(s) with the same lyrics. Tap a title to open it.</p>'+d.map(function(x){return '<div class="trow"><span><a href="#" data-id="'+esc(x.a.id)+'">'+esc(x.a.title.slice(0,48))+'</a><br><a href="#" data-id="'+esc(x.b.id)+'">'+esc(x.b.title.slice(0,48))+'</a></span><span class="tag">'+Math.round(x.r*100)+'%</span></div>'}).join(''):'<p class="note">No repeated lyrics found.</p>';
 };
 $('dupres').onclick=function(e){var a=e.target.closest('a');if(a){e.preventDefault();$('mn').classList.remove('on');openSong(a.getAttribute('data-id'))}};
+var deferred=null;
+function inApp(){return /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|; wv\)|GSA\/|Snapchat|TikTok|musical_ly/i.test(navigator.userAgent)}
+function isIOS(){return /iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)}
+function isStandalone(){return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true}
+function instState(){
+  var t,btn=!!deferred;
+  if(isStandalone())t='Nyimbo is already installed and running as an app.';
+  else if(btn)t='Tap the button below to install.';
+  else if(location.protocol!=='https:'&&location.hostname!=='localhost')t='This page is not opened from a secure https link, so it cannot be installed. Open your GitHub link, which starts with https://.';
+  else if(inApp())t='You opened this inside another app (WhatsApp, Facebook or similar). Tap the ⋮ or share icon and choose "Open in Chrome" (or Safari on iPhone), then try again.';
+  else if(isIOS())t='On iPhone, open this link in Safari, tap the Share icon, then choose "Add to Home Screen". Other browsers on iPhone cannot install apps.';
+  else t='Your browser has not offered the install button yet. Tap the ⋮ menu in Chrome and choose "Install app" or "Add to Home screen". If neither appears, close Chrome completely, open the link again, wait 10 seconds and check the menu again.';
+  $('insthelp').textContent=t;$('inst').style.display=btn?'block':'none';$('instbox').style.display=isStandalone()?'none':'block';
+}
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferred=e;render();instState()});
+window.addEventListener('appinstalled',function(){deferred=null;render();instState();toast('Nyimbo installed')});
+$('inst').onclick=function(){if(!deferred)return;deferred.prompt();deferred.userChoice.then(function(){deferred=null;instState();render()},function(){})};
 $('mback').onclick=function(){$('mn').classList.remove('on');render()};
 $('exp').onclick=function(){
   var data=JSON.stringify({app:'nyimbo',songs:songs},null,1);
