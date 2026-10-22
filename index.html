@@ -7,7 +7,6 @@
 <meta name="theme-color" content="#0f3d3a">
 <meta name="description" content="Song lyrics by type: hymns, reggae, praise, worship and more">
 <link rel="manifest" href="manifest.webmanifest">
-<script src="firebase-config.js"></script>
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -73,7 +72,7 @@ textarea.f{min-height:300px;line-height:1.6;font-family:Literata,Georgia,serif}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Nyimbo</h1><button class="hb" id="menu">Backup &amp; sharing</button></div>
+  <div class="top"><h1>Nyimbo</h1><button class="hb" id="menu">Backup &amp; install</button></div>
   <input id="q" type="search" placeholder="Search title, number or lyrics" aria-label="Search songs">
 </header>
 <div class="chips" id="chips"></div>
@@ -106,9 +105,7 @@ textarea.f{min-height:300px;line-height:1.6;font-family:Literata,Georgia,serif}
     <div id="instbox"><h3 style="margin:0 0 6px">Install this app</h3><p class="note" id="insthelp"></p><button class="mb" id="inst" style="display:none">Install Nyimbo on this phone</button></div>
     <button class="mb" id="exp">Save a backup file</button>
     <button class="mb" id="imp">Restore from a backup file</button>
-    <div id="auth" style="display:none"><input class="f" id="em" type="email" placeholder="Editor email" autocomplete="username"><input class="f" id="pw" type="password" placeholder="Password" autocomplete="current-password" style="margin:8px 0"><button class="mb" id="signin">Sign in as editor</button></div>
     <input type="file" id="file" accept=".json,application/json" style="display:none">
-    <button class="mb" id="mig" style="display:none">Move songs from this device to the shared library</button>
     <button class="mb" id="dups">Check for repeated lyrics</button><div id="dupres"></div>
     <h3 style="margin:26px 0 6px">Song types</h3>
     <div id="tlist"></div>
@@ -147,11 +144,9 @@ function addOrMerge(s,map){
   if(ex){var u=tc(ex).slice();tc(s).forEach(function(c){if(u.indexOf(c)<0)u.push(c)});if(u.length===tc(ex).length)return null;ex.cats=u;ex.cat=u[0];return put(ex);}
   map[k]=s;return put(s);
 }
-var sharedTypes=null,dbh=null,fbMode=false,fbUser=null;
-function canEdit(){return !fbMode||!!fbUser||window.NYIMBO_OPEN===true}
 var local={songs:[],size:20};
 var favs={};
-var songs=[],shared=false,dbc=null,dl=null;
+var songs=[],dl=null;
 var cur='All',editing=null,viewing=null;
 try{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&s.songs)local=s;}catch(e){}
 try{favs=JSON.parse(localStorage.getItem(FKEY)||'{}')||{};}catch(e){}
@@ -163,6 +158,19 @@ if(!local.songs.length&&!local.seeded){
 songs=local.songs;
 local.songs.forEach(function(s){s.title=String(s.title||'').toUpperCase()});
 if(local.impV!==3){var have={};local.songs.forEach(function(s){have[s.id]=1;have[normT(s.title)]=1});BUILTIN.forEach(function(b){if(!have[b.i]&&!have[normT(b.t)])local.songs.push(toSong(b))});BUILTIN.forEach(function(b){if(!b.y)return;var x=local.songs.filter(function(s){return s.id===b.i})[0];if(x&&!x.lyrics)x.lyrics=b.y});local.imported=true;local.impV=3;try{localStorage.setItem(KEY,JSON.stringify(local))}catch(e){}}
+try{
+  var mm=JSON.parse(localStorage.getItem('nyimbo-mirror')||'null');
+  if(mm&&Array.isArray(mm.songs)&&!local.mergedMirror){
+    mm.songs.forEach(function(ms){
+      if(!ms||!ms.title)return;
+      var x=local.songs.filter(function(s){return s.id===ms.id||normT(s.title)===normT(ms.title)})[0];
+      if(!x){local.songs.push({id:ms.id||newId(),num:ms.num||'',title:String(ms.title).toUpperCase(),cat:tc(ms)[0]||'Worship',cats:tc(ms).length?tc(ms):['Worship'],lyrics:ms.lyrics||'',lang:ms.lang||''});return}
+      if(!x.lyrics&&ms.lyrics)x.lyrics=ms.lyrics;
+      var u=tc(x).slice();tc(ms).forEach(function(c){if(u.indexOf(c)<0)u.push(c)});x.cats=u;x.cat=u[0]||x.cat;
+    });
+    local.mergedMirror=true;localStorage.setItem(KEY,JSON.stringify(local));localStorage.removeItem('nyimbo-mirror');
+  }
+}catch(e){}
 function $(i){return document.getElementById(i)}
 function esc(x){var d=document.createElement('div');d.textContent=x;return d.innerHTML.replace(/"/g,'&quot;')}
 function saveLocal(){try{localStorage.setItem(KEY,JSON.stringify(local));}catch(e){}}
@@ -170,22 +178,19 @@ function saveFavs(){try{localStorage.setItem(FKEY,JSON.stringify(favs));}catch(e
 var tt;function toast(m){var t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(tt);tt=setTimeout(function(){t.style.display='none'},3200)}
 function newId(){return 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 
-/* ---- storage: shared (db) when available, else this device ---- */
+/* ---- storage: this device only ---- */
 function put(song){
-  if(shared){return dbc.doc(song.id).set(song).catch(function(){toast('Could not save. You may have view-only access.')});}
   var i=local.songs.findIndex(function(x){return x.id===song.id});
   if(i<0)local.songs.push(song);else local.songs[i]=song;
   saveLocal();return Promise.resolve();
 }
 function remove(id){
-  if(shared){return dbc.doc(id).delete().catch(function(){toast(window.NYIMBO_OPEN===true?'Only admins can delete songs. Sign in from Backup & sharing.':'Could not delete. You may have view-only access.')});}
   local.songs=local.songs.filter(function(x){return x.id!==id});songs=local.songs;saveLocal();return Promise.resolve();
 }
-function cats(){var c=(shared?(sharedTypes||DEF_CATS):(local.types||DEF_CATS)).slice();songs.forEach(function(s){tc(s).forEach(function(x){if(c.indexOf(x)<0)c.push(x)})});return c}
+function cats(){var c=(local.types||DEF_CATS).slice();songs.forEach(function(s){tc(s).forEach(function(x){if(c.indexOf(x)<0)c.push(x)})});return c}
 
 function saveTypes(list){
-  if(shared){sharedTypes=list;dbh.doc('meta/types').set({list:list}).catch(function(){toast('Could not save. You may have view-only access.')});}
-  else{local.types=list;saveLocal();}
+  local.types=list;saveLocal();
 }
 function addType(name){
   name=name.replace(/\s+/g,' ').trim();if(!name)return;
@@ -203,23 +208,6 @@ function renderTypes(){
     return '<div class="trow"><span>'+esc(c)+' ('+n+')</span>'+(n?'':'<button data-r="'+esc(c)+'">Remove</button>')+'</div>';
   }).join('');
 }
-function needImport(){
-  if(!shared)return false;
-  if(fbMode&&!fbUser)return false;
-  try{if(localStorage.getItem('nyimbo-imported3'))return false}catch(e){}
-  var have={};songs.forEach(function(s){have[s.id]=s});return BUILTIN.some(function(b){var x=have[b.i];return !x||(b.y&&!x.lyrics)});
-}
-function importBuiltin(){
-  var map=titleMap(),byId={};songs.forEach(function(s){byId[s.id]=s});var q=BUILTIN.filter(function(b){var x=byId[b.i]||map[normT(b.t)];return !x||(b.y&&!x.lyrics)}),done=0,fail=0;toast('Adding songs…');
-  function next(){var b=q.shift();if(!b)return Promise.resolve();
-    var x=byId[b.i]||map[normT(b.t)];var w=x?dbc.doc(x.id).set(Object.assign({},x,{lyrics:b.y})):dbc.doc(b.i).set(toSong(b));return w.then(function(){done++},function(){fail++;q.length=0}).then(next);}
-  Promise.all([next(),next(),next(),next()]).then(function(){
-    if(fail)toast('Stopped early. You may have view-only access.');
-    else{toast('Added '+done+' songs');try{localStorage.setItem('nyimbo-imported3','1')}catch(e){}}
-    render();
-  });
-}
-function userLocal(){return local.songs.filter(function(s){return !(BIDS[s.id]&&!s.lyrics)})}
 
 /* ---- list ---- */
 function render(){
@@ -237,7 +225,7 @@ function render(){
     return a.title.localeCompare(b.title);
   });
   var inst=(deferred&&!isStandalone())?'<div class="banner"><b>Install Nyimbo on this phone</b><button id="doinst">Install app</button></div>':'';
-  var ban=inst+(needImport()?'<div class="banner"><b>New songs and lyrics from your spreadsheet are ready.</b><button id="doimp">Add them to the shared library</button></div>':'');
+  var ban=inst;
   $('list').innerHTML=ban+(items.length?items.map(function(s){
     return '<button class="song" data-id="'+esc(s.id)+'"><span>'+(s.num?'<span class="num">'+esc(s.num)+'</span>':'')+'<b>'+esc(s.title)+'</b>'+(isComplete(s)?' <span class="ok" role="img" aria-label="Complete">✓</span>':'')+'</span><span class="tag">'+(favs[s.id]?'★ ':'')+esc(tc(s).join(', '))+'</span></button>'
   }).join(''):'<div class="empty">'+(cur==='★ Favourites'?'No favourites yet.<br>Open a song and tap ☆.':'No songs here yet.<br>Tap “Add song” to add one.')+'</div>');
@@ -246,7 +234,7 @@ $('chips').onclick=function(e){
   if(e.target.getAttribute('data-add')){var n=prompt('New song type (for example: Slow worship)');if(n)addType(n);return;}
   var c=e.target.getAttribute('data-c');if(c){cur=c;render();}};
 $('q').oninput=render;
-$('list').onclick=function(e){if(e.target.id==='doimp'){importBuiltin();return;}if(e.target.id==='doinst'){$('inst').onclick();return;}var b=e.target.closest('.song');if(b)openSong(b.getAttribute('data-id'));};
+$('list').onclick=function(e){if(e.target.id==='doinst'){$('inst').onclick();return;}var b=e.target.closest('.song');if(b)openSong(b.getAttribute('data-id'));};
 
 /* ---- viewer ---- */
 function openSong(id){
@@ -260,7 +248,7 @@ function closeView(){stopScroll();$('view').classList.remove('on');}
 $('back').onclick=function(){closeView();render()};
 function fs(d){local.size=Math.min(44,Math.max(14,local.size+d));$('vl').style.fontSize=local.size+'px';saveLocal();}
 $('sm').onclick=function(){fs(-2)};$('lg').onclick=function(){fs(2)};
-$('ed').onclick=function(){if(!canEdit()){toast('Sign in as editor first: Backup & sharing menu');return}stopScroll();openForm(viewing)};
+$('ed').onclick=function(){stopScroll();openForm(viewing)};
 $('fav').onclick=function(){
   if(favs[viewing.id])delete favs[viewing.id];else favs[viewing.id]=1;
   saveFavs();$('fav').textContent=favs[viewing.id]?'★':'☆';
@@ -305,7 +293,7 @@ function lyricWarn(){
 $('l').oninput=function(){clearTimeout(lt);lt=setTimeout(lyricWarn,400)};
 $('lsug').onclick=function(e){var b=e.target.closest('.sg');if(b){$('form').classList.remove('on');openSong(b.getAttribute('data-id'));}};
 $('sug').onclick=function(e){var b=e.target.closest('.sg');if(b){$('form').classList.remove('on');openSong(b.getAttribute('data-id'));}};
-$('add').onclick=function(){if(!canEdit()){toast('Sign in as editor first: Backup & sharing menu');return}openForm(null)};
+$('add').onclick=function(){openForm(null)};
 $('cancel').onclick=function(){$('form').classList.remove('on')};
 $('save').onclick=function(){
   var t=$('t').value.trim().toUpperCase(),l=$('l').value.replace(/\s+$/,''),n=$('n').value.trim();
@@ -331,25 +319,12 @@ $('del').onclick=function(){
 
 /* ---- backup, restore, sharing ---- */
 function openMenu(){
-  $('mode').textContent=shared?'Shared library: songs you add or change are saved for everyone who has this link. Backups include the whole library.':'Songs are saved on this device only. Save a backup file now and then so you never lose them.';
-  $('mig').style.display=(shared&&canEdit()&&userLocal().length)?'block':'none';renderTypes();
-  if(fbMode){
-    $('mode').textContent=window.NYIMBO_OPEN===true?'Shared library: anyone with this link can add and edit songs, and every change shows on everyone\'s app. Only admins can delete songs'+(fbUser?' (you are signed in as an admin).':'.'):(fbUser?'Shared library: everyone with this link sees the same songs. You are signed in, so your changes sync to everyone.':'Shared library: everyone with this link sees the same songs. Only signed-in editors can add or change songs.');
-    $('em').style.display=$('pw').style.display=fbUser?'none':'block';
-    $('signin').textContent=fbUser?'Signed in as '+fbUser.email+' (tap to sign out)':(window.NYIMBO_OPEN===true?'Admin sign-in (to delete songs)':'Sign in as editor');
-    if(mirrorT)$('mode').textContent+=' Last synced: '+new Date(mirrorT).toLocaleString()+'.';
-  }
-  $('auth').style.display=fbMode?'block':'none';
+  $('mode').textContent='Songs are saved on this phone only. Save a backup file now and then so you never lose them.';renderTypes();
   instState();$('mn').classList.add('on');
 }
 $('menu').onclick=openMenu;
 $('addtype').onclick=function(){addType($('ntype').value);$('ntype').value=''};
 $('tlist').onclick=function(e){var r=e.target.getAttribute('data-r');if(r)removeType(r)};
-$('signin').onclick=function(){
-  if(fbUser){firebase.auth().signOut();return;}
-  var em=$('em').value.trim(),pw=$('pw').value;if(!em||!pw){toast('Enter email and password');return}
-  firebase.auth().signInWithEmailAndPassword(em,pw).then(function(){$('pw').value='';toast('Signed in')}).catch(function(){toast('Sign-in failed. Check email and password.')});
-};
 $('dups').onclick=function(){
   var d=allDupes(),box=$('dupres');
   box.innerHTML=d.length?'<p class="note">'+d.length+' pair(s) with the same lyrics. Tap a title to open it.</p>'+d.map(function(x){return '<div class="trow"><span><a href="#" data-id="'+esc(x.a.id)+'">'+esc(x.a.title.slice(0,48))+'</a><br><a href="#" data-id="'+esc(x.b.id)+'">'+esc(x.b.title.slice(0,48))+'</a></span><span class="tag">'+Math.round(x.r*100)+'%</span></div>'}).join(''):'<p class="note">No repeated lyrics found.</p>';
@@ -400,39 +375,11 @@ $('file').onchange=function(){
   };
   r.readAsText(f);
 };
-$('mig').onclick=function(){
-  var map=titleMap(),ps=[];userLocal().forEach(function(s){var p=addOrMerge(Object.assign({},s,{id:newId()}),map);if(p)ps.push(p)});
-  Promise.all(ps).then(function(){toast('Moved '+ps.length+' songs to the shared library')});
-};
 
-var mirrorT=0,MKEY='nyimbo-mirror';
-function saveMirror(){mirrorT=Date.now();try{localStorage.setItem(MKEY,JSON.stringify({t:mirrorT,songs:songs}))}catch(e){}}
-function loadMirror(){try{var m=JSON.parse(localStorage.getItem(MKEY)||'null');if(m&&Array.isArray(m.songs)){mirrorT=m.t||0;return m.songs}}catch(e){}return []}
-function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
-function startFirebase(){
-  var cfg=window.NYIMBO_FIREBASE;if(!cfg||!cfg.projectId)return Promise.resolve(null);
-  var base='https://www.gstatic.com/firebasejs/10.12.2/';
-  return ['firebase-app-compat.js','firebase-auth-compat.js','firebase-firestore-compat.js'].reduce(function(p,f){return p.then(function(){return loadScript(base+f)})},Promise.resolve()).then(function(){
-    firebase.initializeApp(cfg);fbMode=true;
-    var f=firebase.firestore();try{f.enablePersistence({synchronizeTabs:true}).catch(function(){})}catch(e){}
-    firebase.auth().onAuthStateChanged(function(u){fbUser=u;render();if($('mn').classList.contains('on'))openMenu()});
-    return f;
-  }).catch(function(){return null});
-}
 /* ---- light up capabilities when present ---- */
 render();
 (function(){
-  var inClaude=!!(window.claude&&claude.use);
-  if(inClaude)claude.use('downloads').then(function(d){dl=d||null}).catch(function(){});
-  (inClaude?claude.use('db'):startFirebase()).then(function(db){
-    if(!db)return;
-    dbc=db.collection('songs');dbh=db;shared=true;songs=loadMirror();render();
-    db.doc('meta/types').onSnapshot(function(s){var d=s.exists&&s.data();sharedTypes=(d&&Array.isArray(d.list))?d.list:null;render();},function(){});
-    dbc.onSnapshot(function(snap){
-      songs=snap.docs.map(function(d){var x=d.data()||{};x.id=d.id;x.title=(x.title||'').toUpperCase();x.lyrics=x.lyrics||'';x.cat=x.cat||'Worship';return x});
-      saveMirror();render();
-    },function(){shared=false;songs=local.songs;render();});
-  }).catch(function(){});
+  if(window.claude&&claude.use)claude.use('downloads').then(function(d){dl=d||null}).catch(function(){});
 })();
 try{if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(function(){});}catch(e){}
 </script>
